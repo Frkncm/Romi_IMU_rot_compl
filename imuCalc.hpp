@@ -125,16 +125,15 @@ class imuCalculator {
       return false;
     }
 
-    void turnSetup(LSM6 const & imuIns, uint16_t cal_rot_rate)
+    void turnSetup(uint16_t cal_rot_rate)
     {
       // Calibrate the gyro.
       int32_t total = 0;
       for (uint16_t i = 0; i < cal_rot_rate; i++)
       {
         // Wait for new data to be available, then read it.
-        while (!imuIns.readReg(LSM6::STATUS_REG) & 0x08);
-        imuIns.read();
-
+        while (!imu.readReg(LSM6::STATUS_REG) & 0x08);
+        imu.read();
         // Add the Z axis reading to the total.
         total += imu.g.z;
       }
@@ -146,11 +145,11 @@ class imuCalculator {
       turnAngle = 0;
     }
 
-    void turnUpdate(LSM6 const & imuIns)
+    void turnUpdate()
     {
       // Read the measurements from the gyro.
-      imuIns.readGyro();
-      turnRate = imuIns.g.z - gyroOffset;
+      imu.readGyro();
+      turnRate = imu.g.z - gyroOffset;
 
       // Figure out how much time has passed since the last update (dt)
       uint16_t m = micros();

@@ -18,7 +18,7 @@
 #define SEND_DATA 1
 
 LSM6 imu;
-ComplementFilter<LSM6> cmp(imu);
+ComplementFilter cmp;
 imuCalculator imclc;
 Kinematics_c knm;
 //Bluetooth instance
@@ -130,14 +130,15 @@ taskInsert exampleTaskIns(exampleTask, 10);
 void exampleTask(void) {
 
   static int staticTime = 0;
-
+  //imu values should be always updated.
+  imu.read();
   //update the filter values
   cmp.updateFilter();
 
   //get the coordinate using IMU sensor parameters
-  
+
   //imclc.updateRotation(cmp.getFilteredZ());
-  imclc.turnUpdate(imu);
+  imclc.turnUpdate();
   imclc.getCoordinate(imclc.turnRotation, cmp.getFilteredY());
   //Serial.println(imclc.turnRotation);
 
@@ -168,7 +169,7 @@ void setup() {
   delay(2000);
 
   cmp.cal_compl_params(2000);
-  imclc.turnSetup(imu, 1024);
+  imclc.turnSetup(1024);
 
   bthc05.begin(9600);
   GO_HANDLE(IDLE_STATE); // start with handling IDLE state
@@ -235,6 +236,7 @@ void loop() {
       }
 
     case MOTOR_STOP: {
+        imu.read();
         cmp.updateFilter();//stabilize its z axis value
         WAIT_NONBLOCKING_SAME_MS(500, MOTOR_STOP);
         leftMotor.motorControl(0);

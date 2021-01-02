@@ -1,16 +1,16 @@
 #ifndef _COMPLEMENTARY_FILTER_
 #define _COMPLEMENTARY_FILTER_
 
+#include "bsp.h"
+
 #define WEIGHT 0.93
 
-template<typename cls>
 class ComplementFilter {
 
   private:
     uint32_t timer_;
 
     /* IMU Data */
-    cls * imu_;
     double accX_, accY_, accZ_;
     double gyroX_, gyroY_, gyroZ_;
     double gyroXangle_, gyroYangle_, gyroZangle_; // Angle calculate using the gyro only
@@ -23,8 +23,7 @@ class ComplementFilter {
 
   public:
 
-    ComplementFilter(cls const & imu_sensor) {
-      imu_ = &imu_sensor;
+    ComplementFilter() {
       timer_ = micros();
     }
 
@@ -32,18 +31,6 @@ class ComplementFilter {
       if ( w > 1 || w < 0)
         return;
       weight_combination = w;
-    }
-
-    void set_X_calibration(float cal_X) {
-      calibration_X = cal_X;
-    }
-
-    void set_Y_calibration(float cal_Y) {
-      calibration_Y = cal_Y;
-    }
-
-    void set_Z_calibration(float cal_Z) {
-      calibration_Z = cal_Z;
     }
 
     float getFilteredX() {
@@ -74,20 +61,20 @@ class ComplementFilter {
       cal_val_Y /= (float)cal_sample_rate;
       cal_val_Z /= (float)cal_sample_rate;
 
-      set_X_calibration(cal_val_X);
-      set_Y_calibration(cal_val_Y);
-      set_Z_calibration(cal_val_Z);
+      calibration_X = cal_val_X;
+      calibration_Y = cal_val_Y;
+      calibration_Z = cal_val_Z;
     }
 
     void updateImuValues() {
-      imu_->read();
-      accX_ = imu_->a.x;
-      accY_ = imu_->a.y;
-      accZ_ = imu_->a.z;
+      imu.read();
+      accX_ = imu.a.x;
+      accY_ = imu.a.y;
+      accZ_ = imu.a.z;
 
-      gyroX_ = imu_->g.x;
-      gyroY_ = imu_->g.y;
-      gyroZ_ = imu_->g.z;
+      gyroX_ = imu.g.x;
+      gyroY_ = imu.g.y;
+      gyroZ_ = imu.g.z;
     }
 
     void updateFilter() {
