@@ -52,6 +52,8 @@ class ComplementFilter {
       //Calibrate the sensor
       for (int i = 0; i < cal_sample_rate; i++) {
         //wait till sensor stabilize
+        while (!imu.readReg(LSM6::STATUS_REG) & 0x08);
+        imu.read();
         updateFilter();
         cal_val_X += getFilteredX();
         cal_val_Y += getFilteredY();

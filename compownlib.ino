@@ -10,12 +10,12 @@
 #define _SPEED_ 45
 
 #define KP_VAL 45.0  // increase response time, but it'll increase oscillation also
-#define KI_VAL 0.30   // minimise the total error 
+#define KI_VAL 0.3   // minimise the total error 
 #define KD_VAL 1.0   // if there is a huge changing
 
 #define SQUARE_DISTANCE 500
 
-#define SEND_DATA 1
+#define SEND_DATA 0
 
 LSM6 imu;
 ComplementFilter cmp;
@@ -98,6 +98,8 @@ taskInsert imuTaskIns(imuTask, 10);
 void imuTask(void) {
   static int staticTime = 0;
 
+  imu.read();
+
   //update the filter values
   cmp.updateFilter();
 
@@ -122,27 +124,19 @@ void imuTask(void) {
 
 }
 
-
-
 void exampleTask(void);
 taskInsert exampleTaskIns(exampleTask, 10);
 
 void exampleTask(void) {
 
   static int staticTime = 0;
-  //imu values should be always updated.
-  imu.read();
   //update the filter values
   cmp.updateFilter();
 
   //get the coordinate using IMU sensor parameters
-
-  //imclc.updateRotation(cmp.getFilteredZ());
   imclc.turnUpdate();
   imclc.getCoordinate(imclc.turnRotation, cmp.getFilteredY());
-  //Serial.println(imclc.turnRotation);
 
-  bool readPin = digitalRead(30);
   staticTime++;
   if (staticTime > 200 && staticTime < 400) {
     leftMotor.motorControl(-_SPEED_ + H_PID.updateValue(0 , (atan((0 - imclc.turnRotation) * PI / 180.0))));
@@ -152,8 +146,8 @@ void exampleTask(void) {
     rightMotor.motorControl(0);
     imclc.velocity = 0;
   }
-  Serial.print(" V: "); Serial.print( cmp.getFilteredY());
-  Serial.print(" turnRot: "); Serial.println(imclc.turnRotation);
+
+  bool readPin = digitalRead(30);
   if (readPin == LOW) {
     staticTime = 0;
   }
@@ -236,7 +230,6 @@ void loop() {
       }
 
     case MOTOR_STOP: {
-        imu.read();
         cmp.updateFilter();//stabilize its z axis value
         WAIT_NONBLOCKING_SAME_MS(500, MOTOR_STOP);
         leftMotor.motorControl(0);
