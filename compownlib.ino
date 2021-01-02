@@ -7,7 +7,9 @@
 #include "bsp.h"
 #include "kinematics.h"
 
-#define _SPEED_ 45
+#define _SPEED_ 60
+#define SMOOTH_STOP -_SPEED_/4
+#define ACCEL_START _SPEED_/3
 
 #define KP_VAL 45.0  // increase response time, but it'll increase oscillation also
 #define KI_VAL 0.3   // minimise the total error 
@@ -15,12 +17,13 @@
 
 #define SQUARE_DISTANCE 500
 
-#define SEND_DATA 0
+#define BLUETOOTH_SEND 0
 
 LSM6 imu;
 ComplementFilter cmp;
 imuCalculator imclc;
 Kinematics_c knm;
+
 //Bluetooth instance
 HardwareSerial& bthc05(Serial1);
 
@@ -46,12 +49,11 @@ uint8_t countTask{ 0 };
 
 float bearing {0};
 
-float driveStraight(float theta_demand) {
-  return H_PID.updateValue(0 , (atan((theta_demand - imclc.rotation) * PI / 180.0)));
-}
-
 //square implementation
 bool taskHandler() {
+  auto driveStraight = [](float theta_demand)->float{return H_PID.updateValue(0 , 
+  (atan((theta_demand - imclc.turnRotation) * PI / 180.0)));};
+  
   if (countTask == 0) {
     if (imclc.Xnew <= SQUARE_DISTANCE) {
       bearing = driveStraight(0);
@@ -91,66 +93,36 @@ bool taskHandler() {
   }
 }
 
+uint8_t loc_speed = 0;
+
 //create the function which is called periodically
 void imuTask(void);
 taskInsert imuTaskIns(imuTask, 10);
 
 void imuTask(void) {
-  static int staticTime = 0;
 
-  imu.read();
-
-  //update the filter values
-  cmp.updateFilter();
-
-  //get the coordinate using IMU sensor parameters
-  imclc.getCoordinate(cmp.getFilteredZ(), cmp.getFilteredY());
-
-#if SEND_DATA
-
-  //Send values trough bluetooth
-  bthc05.print(knm.x); bthc05.print("\t");
-  bthc05.print(knm.y); bthc05.print("\t");
-  bthc05.print(knm.theta * 180 / PI); bthc05.print("\t");
-  //Send values trough bluetooth
-  bthc05.print(imclc.Ynew); bthc05.print("\t");
-  bthc05.print(imclc.Xnew); bthc05.print("\t");
-  bthc05.print(imclc.rotation); bthc05.println("\t");
-
-#endif
-
-  leftMotor.motorControl(turnLeft * -_SPEED_ + bearing);
-  rightMotor.motorControl(turnRight * -_SPEED_ - bearing);
-
-}
-
-void exampleTask(void);
-taskInsert exampleTaskIns(exampleTask, 10);
-
-void exampleTask(void) {
-
-  static int staticTime = 0;
-  //update the filter values
   cmp.updateFilter();
 
   //get the coordinate using IMU sensor parameters
   imclc.turnUpdate();
   imclc.getCoordinate(imclc.turnRotation, cmp.getFilteredY());
 
-  staticTime++;
-  if (staticTime > 200 && staticTime < 400) {
-    leftMotor.motorControl(-_SPEED_ + H_PID.updateValue(0 , (atan((0 - imclc.turnRotation) * PI / 180.0))));
-    rightMotor.motorControl(-_SPEED_ - H_PID.updateValue(0 , (atan((0 - imclc.turnRotation) * PI / 180.0))));
-  } else {
-    leftMotor.motorControl(0);
-    rightMotor.motorControl(0);
-    imclc.velocity = 0;
-  }
+  loc_speed += 3;
 
-  bool readPin = digitalRead(30);
-  if (readPin == LOW) {
-    staticTime = 0;
-  }
+  if (loc_speed > _SPEED_)
+    loc_speed = _SPEED_;
+
+  leftMotor.motorControl(turnLeft * -loc_speed + bearing);
+  rightMotor.motorControl(turnRight * -loc_speed - bearing);
+
+  //Send values trough bluetooth
+
+#if BLUETOOTH_SEND
+  bthc05.print(imclc.Ynew); bthc05.print("\t");
+  bthc05.print(imclc.Xnew); bthc05.print("\t");
+  bthc05.print(imclc.velocity); bthc05.print("\t");
+  bthc05.print(imclc.turnRotation); bthc05.println("\t");
+#endif
 
 }
 
@@ -159,19 +131,23 @@ void setup() {
 
   bsp_ctor();
   pidMotor.reset();
+  
   //Let the user place the robot to calibrate values
-  delay(2000);
+  delay(1000);
 
+  //Calibrate all relevant parameters
   cmp.cal_compl_params(2000);
   imclc.turnSetup(1024);
-
+  
+  //set the calibration value as an offset
+  imclc.setOffset(cmp.calibration_Y);
+  
   bthc05.begin(9600);
   GO_HANDLE(IDLE_STATE); // start with handling IDLE state
 
 }
 
 void loop() {
-
   //Update the time for non-blocking tasks
   taskInsert::executeTasks();
   knm.update(count_e0, count_e1);
@@ -181,10 +157,7 @@ void loop() {
         /*Start the state machine with the idle state (do nothing here)
           GO_HANDLE macro and the others are defined in the Romi.h file.
           They are used to navigate the flow of control. */
-
-        exampleTaskIns.callMyTask();
-
-        GO_HANDLE(IDLE_STATE);
+        GO_HANDLE(PATH_TRACING);
         break;
       }
 
@@ -197,10 +170,11 @@ void loop() {
         } else if (countTask >= 4) {
           BREAK_AND_GO(STOP_SYSTEM)
         } else {
+          if (!imclc.stable_velocity)
+            imclc.stable_velocity = true;
           //Reset the accel. value and motor speed
-          imclc.acceleration = 0.0;
-          leftMotor.motorControl(0);
-          rightMotor.motorControl(0);
+          leftMotor.motorControl(SMOOTH_STOP);
+          rightMotor.motorControl(SMOOTH_STOP);
           GO_HANDLE(WAIT_BEFORE_TURNING);
         }
 
@@ -208,32 +182,32 @@ void loop() {
       }
 
     case WAIT_BEFORE_TURNING: {
-        WAIT_NONBLOCKING_SAME_MS(500, WAIT_BEFORE_TURNING);
+        WAIT_NONBLOCKING_SAME_MS(250, WAIT_BEFORE_TURNING);
         GO_HANDLE(TURN_ROMI_STATE);
         break;
       }
 
     case TURN_ROMI_STATE: {
-        if (!imclc.turnDegree(-90)) {
+        static float last_degree {0};
+        if (((imclc.turnRotation - last_degree) > -90)) {
           //turn motor right
           turnLeft = 1;
           turnRight = -1;
           imuTaskIns.callMyTask();
           GO_HANDLE(TURN_ROMI_STATE);
         } else {
-          imclc.acceleration = 0.0;
-          leftMotor.motorControl(0);
-          rightMotor.motorControl(0);
+          loc_speed = 0;
+          last_degree = imclc.turnRotation;
+          leftMotor.motorControl(SMOOTH_STOP);
+          rightMotor.motorControl(SMOOTH_STOP);
           GO_HANDLE(MOTOR_STOP);
         }
         break;
       }
 
     case MOTOR_STOP: {
-        cmp.updateFilter();//stabilize its z axis value
-        WAIT_NONBLOCKING_SAME_MS(500, MOTOR_STOP);
-        leftMotor.motorControl(0);
-        rightMotor.motorControl(0);
+        //cmp.updateFilter();//stabilize its z axis value
+        WAIT_NONBLOCKING_SAME_MS(250, MOTOR_STOP);
         GO_HANDLE(PATH_TRACING);
         break;
       }
@@ -247,7 +221,6 @@ void loop() {
         GO_HANDLE(IDLE_STATE);
         break;
       }
-
   }
 }
 

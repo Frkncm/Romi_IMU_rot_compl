@@ -5,6 +5,7 @@
 
 #define BUZZER 6
 
+#include <Kalman.h> 
 #include <Wire.h>
 #include <LSM6.h>
 

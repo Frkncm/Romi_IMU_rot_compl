@@ -4,7 +4,7 @@
 #include "bsp.h"
 
 #define VEL_GAIN   10000
-#define OFFSET_DOWN_VAL 1.0
+#define OFFSET_DOWN_VAL 0.2
 #define OFFSET_UP_VAL 5.0
 #define ANG_COEF 0.175
 #define ROT_MEAN 86.6
@@ -18,7 +18,7 @@ class imuCalculator {
     float accOffsetUp{OFFSET_UP_VAL};
 
     uint16_t gyroLastUpdate = 0;
-
+    bool get_initial_velocity {false};
   public:
     // This constant represents a turn of 45 degrees.
     const int32_t turnAngle45 = 0x20000000;
@@ -29,15 +29,17 @@ class imuCalculator {
     // This constant represents a turn of approximately 1 degree.
     const int32_t turnAngle1 = (turnAngle45 + 22) / 45;
     int16_t turnRate;
-    int32_t turnAngle = 0;
-    int32_t turnRotation = 0;
+    float turnAngle = 0;
+    float turnRotation = 0;
 
     float acceleration{0};
     float distance{0};
-    float velocity{0};
-    float rotation{0};
+    float velocity{0}; //constant velocity
+    float const_system_vel {0};
     float Xnew{0}, Ynew {0}; // Y - coordinate
     int16_t gyroOffset;
+
+    bool stable_velocity{false};
 
     imuCalculator() {
       //default ctor.
@@ -48,6 +50,10 @@ class imuCalculator {
 
     }
 
+    void setOffset(float offsetDown_) {
+      accOffsetDown = offsetDown_;
+    }
+
     auto getAcc()->float {
       return acceleration;
     }
@@ -55,10 +61,16 @@ class imuCalculator {
     void getCoordinate (float rot, float acc) {
       //calculate x - y position
       static float last_distance {0};
+
       calcVelDist(acc);
-      Ynew += (distance - last_distance) * sin(rotation * PI / 180);
-      Xnew += (distance - last_distance) * cos(rotation * PI / 180);
+
+      Ynew += (distance - last_distance) * sin(turnRotation * PI / 180);
+      Xnew += (distance - last_distance) * cos(turnRotation * PI / 180);
       last_distance = distance;
+    }
+
+    void calcDistance(float dTime, float loc_velocity) {
+      distance += ( loc_velocity ) * dTime;
     }
 
     void calcVelDist(float acc_new) {
@@ -68,65 +80,41 @@ class imuCalculator {
       static int number_of_sample = 1;
       static bool loc_trigger{ false };
 
-      // Calculate delta time
+      //Calculate delta time
       double dt_ = (double)(micros() - timer) / 1000000.0;
       timer = micros();
 
-      //Eliminate under the offset value (noisy signal)
+      if (stable_velocity) {
+        goto calc_distance;
+      }
+
+      //Eliminate under the offset value (noisy signals)
       if ((acc_new > accOffsetDown)) {
         loc_trigger = true;
         //Trapezoidal integration for getting velocity
-        veloc_new +=  (accel_old + (acc_new - accel_old) / 2.0) * dt_ * 100;
+        veloc_new +=  (accel_old + (acc_new - accel_old) / 2.0) * dt_ * VEL_GAIN;
         accel_old = acc_new;
         number_of_sample++;
       } else {
         if (loc_trigger) {
           loc_trigger = false;
           veloc_new /= (float)number_of_sample;
-          if (veloc_new > velocity)
+          if (veloc_new > velocity) {
             velocity = veloc_new;
+            //get_initial_velocity = true;
+          }
           number_of_sample = 1;
         }
       }
-      //Trapezoidal integration for getting distance
-      distance += ( veloc_old + (veloc_new - veloc_old) / 2.0) * dt_;
+
+      calc_distance:
+      //Calculate the distance
+      calcDistance(dt_, velocity);
+      //update the last velocity
       veloc_old = velocity;
     }
 
-    boolean turnDegree(float desiredAngle) {
-      static float initialAngle{ 0 };
-      static bool  enterTrigger{ true };
-
-      if (enterTrigger) {
-        initialAngle = rotation;
-        enterTrigger = false;
-      }
-
-      float locAngle = (rotation - initialAngle);
-
-      if (desiredAngle > 0) {
-        //compare the angle difference for positive values
-        if (desiredAngle > locAngle) {
-          return false;
-        } else {
-          enterTrigger = true;
-          return true;
-        }
-      } else if (desiredAngle < 0) {
-        //compare the angle difference for positive values
-        if (desiredAngle < locAngle) {
-          return false;
-        }
-        else {
-          enterTrigger = true;
-          return true;
-        }
-      }
-      return false;
-    }
-
-    void turnSetup(uint16_t cal_rot_rate)
-    {
+    void turnSetup(uint16_t cal_rot_rate) {
       // Calibrate the gyro.
       int32_t total = 0;
       for (uint16_t i = 0; i < cal_rot_rate; i++)
@@ -145,8 +133,7 @@ class imuCalculator {
       turnAngle = 0;
     }
 
-    void turnUpdate()
-    {
+    void turnUpdate() {
       // Read the measurements from the gyro.
       imu.readGyro();
       turnRate = imu.g.z - gyroOffset;
@@ -159,7 +146,7 @@ class imuCalculator {
       // Multiply dt by turnRate in order to get an estimation of how
       // much the robot has turned since the last update.
       // (angular change = angular velocity * time)
-      int32_t d = (int32_t)turnRate * dt;
+      float d = (int32_t)turnRate * dt;
 
       // The units of d are gyro digits times microseconds.  We need
       // to convert those to the units of turnAngle, where 2^29 units
@@ -169,8 +156,8 @@ class imuCalculator {
       //
       // (0.035 dps/digit) * (1/1000000 s/us) * (2^29/45 unit/degree)
       // = 7340032/17578125 unit/(digit*us)
-      turnAngle += (int64_t)d * 7340032 / 17578125;
-      turnRotation = turnAngle / turnAngle1;
+      turnAngle += (float)d * 0.417566268; // 7340032.0 / 17578125.0;
+      turnRotation = turnAngle / (float)turnAngle1 * 1.07;
     }
 
 };

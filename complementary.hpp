@@ -16,12 +16,13 @@ class ComplementFilter {
     double gyroXangle_, gyroYangle_, gyroZangle_; // Angle calculate using the gyro only
     double compAngleX_, compAngleY_, compAngleZ_; // Calculated angle using a complementary filter
     double kalAngleX_, kalAngleY_, kalAngleZ_; // Calculated angle using a Kalman filter
-    float calibration_X = 0;
-    float calibration_Y = 0;
-    float calibration_Z = 0;
     float weight_combination = WEIGHT;
 
   public:
+
+    float calibration_X = 0;
+    float calibration_Y = 0;
+    float calibration_Z = 0;
 
     ComplementFilter() {
       timer_ = micros();
@@ -53,7 +54,7 @@ class ComplementFilter {
       for (int i = 0; i < cal_sample_rate; i++) {
         //wait till sensor stabilize
         while (!imu.readReg(LSM6::STATUS_REG) & 0x08);
-        imu.read();
+        updateImuValues();
         updateFilter();
         cal_val_X += getFilteredX();
         cal_val_Y += getFilteredY();
